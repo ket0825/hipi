@@ -4,6 +4,7 @@ import os
 import matplotlib.pyplot as plt
 
 from img_class.base import ImgBase
+from utils.common_utils import set_timer
 
 
 class ObjectImg(ImgBase):
@@ -22,10 +23,15 @@ class ObjectImg(ImgBase):
     
     """
     
+    @property
+    def __name__(self):
+        return "ObjectImg" if not hasattr(self, "src") else f"ObjectImg - {self.src} "
+    
     def __init__(self, src:os.PathLike):
         super().__init__(src, num_radius_divisions=4, num_angle_divisions=8)
-        
-    def set_orb(self, nfeatures:int, nms_distance=5, debug=False):
+
+    @set_timer()
+    def set_orb(self, nfeatures:int, nms_distance=5):
         """
         removebg 처리하니 edgeThreshold 높아도 좋음.
         얇은 구조에 대해서 너무 많은 특징점이 검출되는 것을 방지하기 위해(clustering) non-maximum suppression을 사용함.
@@ -55,7 +61,7 @@ class ObjectImg(ImgBase):
         self.kp1, _ = orb.detectAndCompute(gray, None)        
         
         self.kp1 = ImgBase.non_max_suppression(self.kp1, nms_distance)
-        if debug:
+        if getattr(self, f"_set_orb_debug"):
             result = self.img.copy()
             for kp in self.kp1:
                 x, y = kp.pt
@@ -73,10 +79,12 @@ class ObjectImg(ImgBase):
     def get_kp_length(self):
         return self._N
     
+    @set_timer()
     def set_pca(self):
         self.pca = super().set_pca()
         self.pca_obj_kp = self.pca.fit_transform(np.array([kp.pt for kp in self.kp1]))
-        
+    
+    @set_timer()    
     def set_histogram(self):
         self.radius = self.calculate_max_distance(self.pca_obj_kp) # 이후에 scale 조절에 사용.
         print(f"Object bounding circle radius: {self.radius}")

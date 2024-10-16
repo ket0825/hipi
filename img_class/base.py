@@ -19,17 +19,58 @@ class ImgBase:
     _num_radius_divisions = 4
     _num_angle_divisions = 8
     
-    def __init__(self, src:os.PathLike, num_radius_divisions=4, num_angle_divisions=8):
+    def __init__(self, src:os.PathLike, num_radius_divisions=4, num_angle_divisions=8, debug:bool = False):
         self.src = src
         self.img = cv2.imread(src)
+        self.debug = debug
         self.__class__._num_radius_divisions = num_radius_divisions
         self.__class__._num_angle_divisions = num_angle_divisions
+    
+    def set_method_debug(self, method_name:str, debug:bool):
+        setattr(self, f"_{method_name}_debug", debug)
 
     @classmethod        
     def set_division(cls, num_radius_divisions:int, num_angle_divisions:int):
         cls._num_radius_divisions = num_radius_divisions
         cls._num_angle_divisions = num_angle_divisions
+    
+    # TODO: non_max suppression opt. To be used in set_orb method.
+    # def non_max_suppression(cls, keypoints, min_distance=5):
+    #     if not keypoints:
+    #         return []
+
+    #     # Convert keypoints to a numpy array of coordinates and responses
+    #     kp_array = np.array([(kp.pt[0], kp.pt[1], kp.response) for kp in keypoints], dtype=np.float32)
         
+    #     # Sort keypoints by response (assuming higher is better)
+    #     sorted_indices = np.argsort(-kp_array[:, 2])
+    #     kp_array = kp_array[sorted_indices]
+        
+    #     # Create FLANN matcher
+    #     FLANN_INDEX_KDTREE = 1
+    #     index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+    #     search_params = dict(checks=50)
+    #     flann = cv2.FlannBasedMatcher(index_params, search_params)
+        
+    #     # Convert keypoints to the format expected by FLANN matcher
+    #     kp_locations = kp_array[:, :2].reshape(-1, 1, 2)
+        
+    #     selected = []
+    #     for i, kp in enumerate(kp_array):
+    #         if i == 0:
+    #             selected.append(keypoints[sorted_indices[i]])
+    #             continue
+            
+    #         # Find neighbors within min_distance
+    #         matches = flann.radiusMatch(kp[:2].reshape(1, 1, 2).astype(np.float32), 
+    #                                     kp_locations[:len(selected)], 
+    #                                     min_distance)
+            
+    #         if not matches[0]:  # No neighbors within the radius
+    #             selected.append(keypoints[sorted_indices[i]])
+        
+    #     return selected
+            
     @classmethod
     def non_max_suppression(cls, keypoints, min_distance=5):
         keypoints = sorted(keypoints, key=lambda x: x.response, reverse=True)

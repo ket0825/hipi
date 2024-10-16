@@ -6,6 +6,8 @@ from img_class.base import ImgBase
 from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 
+from utils.common_utils import set_timer
+
 class BackgroundImg(ImgBase):    
     """
     SHOULD KEEP:
@@ -21,10 +23,15 @@ class BackgroundImg(ImgBase):
     self.radii (scale 조절에 사용. array) # shape: M
     """
     
+    @property
+    def __name__(self):
+        return "BackgroundImg" if not hasattr(self, "src") else f"BackgroundImg - {self.src} "
+    
     def __init__(self, src:os.PathLike):
         super().__init__(src)
         
-    def set_orb(self, nfeatures:int, nms_distance=3, debug=False):
+    @set_timer()
+    def set_orb(self, nfeatures:int, nms_distance=3):
         """        
         충분히 큰 nfeatures 사용 필요.        
         """
@@ -52,7 +59,7 @@ class BackgroundImg(ImgBase):
         self.kp1, _ = orb.detectAndCompute(gray, None)        
         
         self.kp1 = ImgBase.non_max_suppression(self.kp1, nms_distance)
-        if debug:
+        if getattr(self, f"_set_orb_debug"):
             result = self.img.copy()
             for kp in self.kp1:
                 x, y = kp.pt
@@ -76,6 +83,7 @@ class BackgroundImg(ImgBase):
     def get_nn_distances(self):
         return self.nn_distances
     
+    @set_timer()
     def set_pca(self, N, T):
         """
         Unlike object image, background image has neighbors' multiple keypoints.
@@ -98,6 +106,7 @@ class BackgroundImg(ImgBase):
         
         print(f"Background PCAs shape: {self.pca_back_kps.shape}")
         
+    @set_timer()
     def set_histograms(self):        
         """        
         """
