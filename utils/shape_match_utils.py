@@ -259,3 +259,90 @@ def ransac_affine(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:n
         plt.show()
     
     return best_params        
+
+
+def stable_affine(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:np.ndarray):
+    """
+    iterative stable affine transformation.                        
+    """
+    # src_points: object image keypoints
+    src_points = np.array([kp.pt for kp in obj_img.kp1])    
+    # dst_points: background image keypoints
+    dst_points = np.array([kp.pt for kp in back_img.kp1])[back_img.N_nn_indices[candidate_indices]] # shape: (len(candidate_indices) x N x 2)    
+    # 후보군에 따른 추가 계산이 필요하다면 이후에 추가
+    dst_points = dst_points[0, :, :] # shape: (N x 2)                
+
+    # 고려해야 할 것.
+    # 1. src PCA 주성분이 음수인 경우
+    # 2. dst PCA 주성분이 음수인 경우
+    # 3. rotate된 src PCA 주성분이 음수인 경우
+    
+    initial_rotates = []
+    where_rotates = []
+    for i, idx in enumerate(candidate_indices):        
+        if back_img.is_rotated[idx]:
+            where_rotates.append(i)    
+                
+    initial_rotates = np.arccos(np.array([back_img.pca_class_list[idx].components_[0] @ obj_img.pca.components_[0] for idx in candidate_indices]))
+    if where_rotates:
+        where_rotates = np.array(where_rotates)
+        initial_rotates[where_rotates] = (2*np.pi - initial_rotates[where_rotates]) % (2*np.pi) # 0 to 2pi
+        print(f"initial_rotates: {initial_rotates}")    
+        
+    initial_scales = []
+    for idx in candidate_indices:
+        initial_scales.append(back_img.radii[idx] / obj_img.radius)
+    
+    plt.imshow(back_img.img)    
+    plt.scatter(dst_points[:, 0], dst_points[:, 1], c='b', s=3)    
+    plt.show()
+        
+    # 후보군에 따른 추가 계산이 필요하다면 이후에 추가
+    inital_rotate = initial_rotates[0]
+    initial_scale = initial_scales[0]            
+    print("initial_scale", initial_scale)    
+    print("Scale: ",back_img.radii[candidate_indices[0]], obj_img.radius)
+    
+    # center points
+    src_center = center_points(src_points)
+    dst_center = center_points(dst_points)
+    dst_center = dst_center[np.argsort(np.arctan2(dst_center[:,1], dst_center[:,0]))] # sort by angle. 0 to 2pi
+    
+    # rotate points
+    src_rotated = rotate_points(src_center, inital_rotate)
+    src_rotated = src_rotated[np.argsort(np.arctan2(src_rotated[:,1], src_rotated[:,0]))] # sort by angle. 0 to 2pi
+    src_scaled = src_rotated * initial_scale
+            
+    plt.scatter(src_scaled[:, 0], src_scaled[:, 1], c='r', s=3)
+    plt.scatter(dst_center[:, 0], dst_center[:, 1], c='b', s=3)
+    plt.legend(['src_scaled', 'dst'])
+    plt.title('scaled points')
+    plt.show()
+    
+    src_solution = src_scaled
+    dst_solution = dst_center
+    params = None
+    while True:
+        params = estimate_affine(src_solution, dst_solution)
+        transformed_points = affine_transform(params, src_solution)
+        squared_residuals = np.sum((transformed_points - dst_solution)**2, axis=1)
+        delta = np.mean(squared_residuals)
+        probs = np.exp(-squared_residuals / (2 * delta))
+        omega = np.mean(probs)
+        
+        inlier_indices = np.where(probs <= 1.3 * omega)[0]        
+        if len(inlier_indices) == len(src_solution):
+            print("No outliers found")
+            break
+        
+        src_solution = src_solution[inlier_indices]
+        dst_solution = dst_solution[inlier_indices]       
+        
+    plt.scatter(affine_transform(params, src_solution)[:, 0], affine_transform(params, src_solution)[:, 1], c='r', s=3)
+    # plt.scatter(transformed_points[:, 0], transformed_points[:, 1], c='r', s=3)
+    plt.scatter(dst_solution[:, 0], dst_solution[:, 1], c='b', s=3)
+    plt.legend(['transformed_src', 'dst'])
+    
+    return params
+    
+    
