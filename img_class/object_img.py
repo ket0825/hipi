@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 from img_class.base import ImgBase
 from utils.common_utils import set_timer
 
+from sklearn.decomposition import PCA
+
 
 class ObjectImg(ImgBase):
     """
@@ -81,16 +83,15 @@ class ObjectImg(ImgBase):
     
     @set_timer()
     def set_pca(self):
-        self.pca = super().set_pca()
+        self.pca = PCA(n_components=2)
         self.pca_obj_kp = self.pca.fit_transform(np.array([kp.pt for kp in self.kp1]))
     
     @set_timer()    
-    def set_histogram(self):
-        self.radius = self.calculate_max_distance(self.pca_obj_kp) / 2 # 이후에 scale 조절에 사용.
+    def set_histogram(self):                                                        
+        self.radius = np.max(np.linalg.norm(self.pca_obj_kp, axis=1)) # 이후에 scale 조절에 사용.
         print(f"Object bounding circle radius: {self.radius}")
-        print(f"super()._num_radius_divisions, super()._num_angle_divisions: {self._num_radius_divisions}, {self._num_angle_divisions}")        
-        
-        distances = np.sqrt(np.sum(self.pca_obj_kp**2, axis=1))                
+        print(f"super()._num_radius_divisions, super()._num_angle_divisions: {self._num_radius_divisions}, {self._num_angle_divisions}")                
+        distances = np.linalg.norm(self.pca_obj_kp, axis=1)
         angles = np.arctan2(self.pca_obj_kp[:, 1], self.pca_obj_kp[:, 0])    
         angles = np.degrees(angles) % 360        
         radius_indices = np.minimum((distances / (self.radius / self._num_radius_divisions)).astype(int), self._num_radius_divisions - 1)                

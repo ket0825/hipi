@@ -21,6 +21,8 @@ class BackgroundImg(ImgBase):
     self.img (원본)
     
     self.radii (scale 조절에 사용. array) # shape: M
+    
+    self.is_rotated (Object의 회전 여부. array) # shape: M
     """
     
     @property
@@ -28,7 +30,7 @@ class BackgroundImg(ImgBase):
         return "BackgroundImg" if not hasattr(self, "src") else f"BackgroundImg - {self.src} "
     
     def __init__(self, src:os.PathLike):
-        super().__init__(src)
+        super().__init__(src, num_radius_divisions=4, num_angle_divisions=8)
         
     @set_timer()
     def set_orb(self, nfeatures:int, nms_distance=3):
@@ -56,8 +58,7 @@ class BackgroundImg(ImgBase):
             fastThreshold=10, # FAST detector에서 근처 픽셀들이 얼마나 밝거나 어두워야 하는지에 대한 임계값
         )
 
-        self.kp1, _ = orb.detectAndCompute(gray, None)        
-        
+        self.kp1, _ = orb.detectAndCompute(gray, None)                
         self.kp1 = ImgBase.non_max_suppression(self.kp1, nms_distance)
         if getattr(self, f"_set_orb_debug"):
             result = self.img.copy()
@@ -71,7 +72,7 @@ class BackgroundImg(ImgBase):
             
         print(f"Background keypoints: {len(self.kp1)}")
         
-        self._M = len(self.kp1)
+        self._M = len(self.kp1)        
         # return self.img, self.kp1
 
     def get_kp_length(self):
@@ -90,21 +91,23 @@ class BackgroundImg(ImgBase):
         """
         back_kp_coords = np.array([kp.pt for kp in self.kp1])
         neighbors = NearestNeighbors(n_neighbors=N, algorithm='ball_tree').fit(back_kp_coords)
-        self.pca_class_list = [super().set_pca()] * self._M
-        distances, indices = neighbors.kneighbors(back_kp_coords) # shape: M x N
+        self.pca_class_list = [PCA(n_components=2) for _ in range(self._M)] 
+        self.is_rotated = np.zeros(self._M, dtype=bool)
+        # 중앙점을 기준으로 가장 가까운 N개의 점들의 index, 거리.
+        _, self.N_nn_indices = neighbors.kneighbors(back_kp_coords) # shape: M x N 
         
         # 특정 index에서의 가장 가까운 점들 T에 대한 정보도 필요함...
         t_nn = NearestNeighbors(n_neighbors=T+1, algorithm='kd_tree').fit(back_kp_coords)
-        self.t_nn_distances, self.t_nn_indices = t_nn.kneighbors(back_kp_coords)
-        self.t_nn_distances = self.t_nn_distances[:, 1:] # 자기 자신은 제외
-        self.t_nn_indices = self.t_nn_indices[:, 1:]
-        
-        self.radii = np.max(distances, axis=1) # shape: M    
-        
+        _, self.t_nn_indices = t_nn.kneighbors(back_kp_coords)        
+        self.t_nn_indices = self.t_nn_indices[:, 1:] # 자기 자신은 제외.
+                        
         self.pca_back_kps = np.array([self.pca_class_list[i].fit_transform(back_kp_coords[idx, :]) 
-                             for i, idx in enumerate(indices)]) # shape: M x N x 2                
+                             for i, idx in enumerate(self.N_nn_indices)]) # shape: M x N x 2                                        
+        self.radii = np.max(np.linalg.norm(self.pca_back_kps, axis=2), axis=1) # shape: M                    
         
-        print(f"Background PCAs shape: {self.pca_back_kps.shape}")
+        print(f"Background PCAs shape: {self.pca_back_kps.shape}")        
+        
+        
         
     @set_timer()
     def set_histograms(self):        
@@ -129,6 +132,13 @@ class BackgroundImg(ImgBase):
         # np.add.at을 사용하여 히스토그램 계산
         for i in range(self._M):
             np.add.at(self.histograms[i], (r_bins[i], theta_bins[i]), 1)
+    
+    @set_timer()
+    def get_candidates_indices(self, scores, num_of_candidates):        
+        candidates_indices = np.argsort(scores, axis=0)[-num_of_candidates:][::-1] # 뒤에서부터 num_of_candidates개만 역순으로 추출        
+        return candidates_indices
+        
+        
         
                 
         
