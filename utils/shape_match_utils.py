@@ -64,5 +64,59 @@ def compute_refined_score(back_img: BackgroundImg, obj_img: ObjectImg, back_idx,
     t_nn_score = np.average(t_nn_similarity)
     # 식이 약간 특이함...
     return initial_score * t_nn_score + scale_weight * scale_score(back_img, back_idx, obj_img) 
+
+def interpolate_feature_scores(back_img:BackgroundImg, scores):
+    # 이미지 로드 (BGR 형식)    
+    height, width = back_img.img.shape[:2]
+    feature_points = np.array([kp.pt for kp in back_img.kp1])
+    # RBF 보간기 생성 (TPS와 유사)
+    rbf = Rbf(feature_points[:, 0], feature_points[:, 1], scores, function='thin_plate')
+
+    # 전체 이미지에 대한 그리드 생성
+    x = np.arange(0, width)
+    y = np.arange(0, height)
+    X, Y = np.meshgrid(x, y)
+
+    # 보간 수행
+    Z = rbf(X, Y)
+
+    return X, Y, Z
+
+def visualize_results(X, Y, Z, back_img:BackgroundImg):
+    # 결과 정규화 (0-255 범위로)
+    Z_normalized = cv2.normalize(Z, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+    # Heatmap 생성 (1채널을 3채널로 변환)
+    heatmap = cv2.applyColorMap(Z_normalized, cv2.COLORMAP_JET)
+
+    # 원본 이미지와 heatmap 합성
+    alpha = 0.6  # heatmap의 투명도
+    image = back_img.img
+    overlay = cv2.addWeighted(image, 1 - alpha, heatmap, alpha, 0)
     
+    # 결과 저장
+    cv2.imwrite('heatmap_overlay.jpg', overlay)
+
+    # Matplotlib을 사용한 시각화
+    plt.figure(figsize=(18, 6))
+
+    # 3D 표면 플롯
+    ax1 = plt.subplot(131, projection='3d')
+    ax1.plot_surface(X, Y, Z, cmap='viridis')
+    ax1.set_title('Interpolated Surface')
+
+    # 2D Heatmap
+    ax2 = plt.subplot(132)
+    im = ax2.imshow(Z, cmap='viridis')
+    ax2.set_title('2D Heatmap')
+    plt.colorbar(im)
+
+    # Heatmap Overlay
+    ax3 = plt.subplot(133)
+    ax3.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
+    ax3.set_title('Heatmap Overlay on Original Image')
+
+    plt.tight_layout()
+    plt.savefig('visualization_results.png')
+    plt.close()
     
