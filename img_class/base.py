@@ -73,8 +73,8 @@ class ImgBase:
             
     @classmethod
     def non_max_suppression(cls, keypoints, min_distance=5):
-        keypoints = sorted(keypoints, key=lambda x: x.response, reverse=True)
-        selected = []
+        keypoints = sorted(keypoints, key=lambda x: x.response, reverse=True) # TODO: response에 따른 필터링도 가능.                        
+        selected = []        
         for kp in keypoints:            
             if any(cls.distance(kp, s) < min_distance for s in selected):
                 continue
@@ -88,7 +88,7 @@ class ImgBase:
     
     @staticmethod
     def calculate_max_distance(pca_points):
-    # 각 점에서 다른 모든 점까지의 벡터 계산
+        # 각 점에서 다른 모든 점까지의 벡터 계산
         diff = pca_points[:, np.newaxis, :] - pca_points[np.newaxis, :, :]    
         
         # 거리의 제곱 계산
@@ -106,5 +106,5 @@ class ImgBase:
         pass
     
     def set_pca(self):
-        return PCA(n_components=2)
+        pass
     
