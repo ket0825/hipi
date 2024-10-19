@@ -86,7 +86,7 @@ class ObjectImg(ImgBase):
     
     @set_timer()    
     def set_histogram(self):
-        self.radius = self.calculate_max_distance(self.pca_obj_kp) # 이후에 scale 조절에 사용.
+        self.radius = self.calculate_max_distance(self.pca_obj_kp) / 2 # 이후에 scale 조절에 사용.
         print(f"Object bounding circle radius: {self.radius}")
         print(f"super()._num_radius_divisions, super()._num_angle_divisions: {self._num_radius_divisions}, {self._num_angle_divisions}")        
         
