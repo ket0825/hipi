@@ -120,7 +120,7 @@ def visualize_results(X, Y, Z, back_img:BackgroundImg):
     plt.savefig('visualization_results.png')
     plt.close()
     
-def center_points(points):
+def centerize_points(points):
     return points - np.mean(points, axis=0)
 
 def rotate_points(points, angle):
@@ -156,6 +156,7 @@ def affine_transform(params, points):
     """Apply affine transformation."""
     a, b, c, d, e, f = params.reshape(6)
     x, y = points[:, 0], points[:, 1]
+    # shear: b, d
     return np.column_stack((a*x + b*y + c, d*x + e*y + f))
 
 def estimate_affine(src_points, dst_points):
@@ -204,14 +205,14 @@ def ransac_affine(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:n
         initial_scales.append(back_img.radii[idx] / obj_img.radius)
     
     # 후보군에 따른 추가 계산이 필요하다면 이후에 추가
-    inital_rotate = initial_rotates[0]
+    rotation_angle = initial_rotates[0]
     initial_scale = initial_scales[0]           
     
     # Normalize points
-    src_normalized, src_center, src_scale = normalize_points(src_points, angle=inital_rotate)
+    src_normalized, src_center, src_scale = normalize_points(src_points, angle=rotation_angle)
     dst_normalized, dst_center, dst_scale = normalize_points(dst_points)                                
         
-    cos_theta, sin_theta = np.cos(inital_rotate), np.sin(inital_rotate)
+    cos_theta, sin_theta = np.cos(rotation_angle), np.sin(rotation_angle)
     initial_params = np.array([
         initial_scale * cos_theta, -initial_scale * sin_theta, 0,
         initial_scale * sin_theta, initial_scale * cos_theta, 0
@@ -258,8 +259,80 @@ def ransac_affine(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:n
         plt.title('best_inliers')
         plt.show()
     
-    return best_params        
+    return best_params
 
+def find_stable_affine(src_points, dst_points):
+    while True:        
+        params = estimate_affine(src_points, dst_points)        
+        transformed = affine_transform(params, src_points)
+        squared_residuals = np.sum((transformed - dst_points)**2, axis=1)
+        delta = np.mean(squared_residuals)
+        
+        probs = np.exp(-squared_residuals / (2 * delta))
+        omega = np.mean(probs)
+        
+        inliers = probs <= 1.3 * omega
+        if len(inliers) == len(src_points):
+            break
+        
+        src_points = src_points[inliers]
+        dst_points = dst_points[inliers]
+    
+    return params            
+
+def transform_object(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices):
+    # src_points: object image keypoints
+    src_points = np.array([kp.pt for kp in obj_img.kp1])    
+    # dst_points: background image keypoints
+    dst_points = np.array([kp.pt for kp in back_img.kp1])[back_img.N_nn_indices[candidate_indices]] # shape: (len(candidate_indices) x N x 2)    
+    # 후보군에 따른 추가 계산이 필요하다면 이후에 추가
+    dst_points = dst_points[0, :, :] # shape: (N x 2)                
+
+    # 고려해야 할 것.
+    # 1. src PCA 주성분이 음수인 경우
+    # 2. dst PCA 주성분이 음수인 경우
+    # 3. rotate된 src PCA 주성분이 음수인 경우
+
+    scales = back_img.radii[candidate_indices] / obj_img.radius    
+    back_pca_components = np.array([back_img.pca_class_list[idx].components_[0] for idx in candidate_indices])
+    rotation_angles = np.arccos(np.dot(back_pca_components, obj_img.pca.components_[0]))
+    where_rotates = np.where(back_img.is_rotated[candidate_indices])[0]
+    rotation_angles[where_rotates] = rotation_angles[where_rotates] + np.pi        
+    
+    plt.imshow(back_img.img)    
+    plt.scatter(dst_points[:, 0], dst_points[:, 1], c='b', s=3)    
+    plt.show()
+        
+    # 후보군에 따른 추가 계산이 필요하다면 이후에 추가
+    rotation_angle = rotation_angles[0]
+    scale = scales[0]        
+    
+    centered_src = centerize_points(src_points)
+    rotation_matrix = np.array([[np.cos(rotation_angle), -np.sin(rotation_angle)], 
+                                [np.sin(rotation_angle), np.cos(rotation_angle)]])
+    rotated_src = centered_src.dot(rotation_matrix)        
+    
+    scaled_src = rotated_src * scale
+    
+    # center points
+    src_center = centerize_points(src_points)
+    dst_center = centerize_points(dst_points)
+    dst_center = dst_center[np.argsort(np.arctan2(dst_center[:,1], dst_center[:,0]))] # sort by angle. 0 to 2pi
+    
+    # rotate points
+    src_rotated = rotate_points(src_center, rotation_angle)
+    src_rotated = src_rotated[np.argsort(np.arctan2(src_rotated[:,1], src_rotated[:,0]))] # sort by angle. 0 to 2pi
+    src_scaled = src_rotated * initial_scale
+    
+    final_src = scaled_src + np.mean(dst_points, axis=0)
+    affine_matrix = find_stable_affine(final_src, dst_points)
+    
+    plt.scatter(affine_transform(affine_matrix, final_src)[:, 0], affine_transform(affine_matrix, final_src)[:, 1], c='r', s=3)    
+    plt.scatter(dst_points[:, 0], dst_points[:, 1], c='b', s=3)
+    plt.legend(['transformed_src', 'dst'])
+    plt.show()
+    
+    return affine_matrix
 
 def stable_affine(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:np.ndarray):
     """
@@ -276,40 +349,28 @@ def stable_affine(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:n
     # 1. src PCA 주성분이 음수인 경우
     # 2. dst PCA 주성분이 음수인 경우
     # 3. rotate된 src PCA 주성분이 음수인 경우
-    
-    initial_rotates = []
-    where_rotates = []
-    for i, idx in enumerate(candidate_indices):        
-        if back_img.is_rotated[idx]:
-            where_rotates.append(i)    
-                
-    initial_rotates = np.arccos(np.array([back_img.pca_class_list[idx].components_[0] @ obj_img.pca.components_[0] for idx in candidate_indices]))
-    if where_rotates:
-        where_rotates = np.array(where_rotates)
-        initial_rotates[where_rotates] = (2*np.pi - initial_rotates[where_rotates]) % (2*np.pi) # 0 to 2pi
-        print(f"initial_rotates: {initial_rotates}")    
-        
-    initial_scales = []
-    for idx in candidate_indices:
-        initial_scales.append(back_img.radii[idx] / obj_img.radius)
+
+    initial_scales = back_img.radii[candidate_indices] / obj_img.radius    
+    back_pca_components = np.array([back_img.pca_class_list[idx].components_[0] for idx in candidate_indices])
+    rotation_angles = np.arccos(np.dot(back_pca_components, obj_img.pca.components_[0]))
+    where_rotates = np.where(back_img.is_rotated[candidate_indices])[0]
+    rotation_angles[where_rotates] = rotation_angles[where_rotates] + np.pi        
     
     plt.imshow(back_img.img)    
     plt.scatter(dst_points[:, 0], dst_points[:, 1], c='b', s=3)    
     plt.show()
         
     # 후보군에 따른 추가 계산이 필요하다면 이후에 추가
-    inital_rotate = initial_rotates[0]
+    rotation_angle = rotation_angles[0]
     initial_scale = initial_scales[0]            
-    print("initial_scale", initial_scale)    
-    print("Scale: ",back_img.radii[candidate_indices[0]], obj_img.radius)
     
     # center points
-    src_center = center_points(src_points)
-    dst_center = center_points(dst_points)
+    src_center = centerize_points(src_points)
+    dst_center = centerize_points(dst_points)
     dst_center = dst_center[np.argsort(np.arctan2(dst_center[:,1], dst_center[:,0]))] # sort by angle. 0 to 2pi
     
     # rotate points
-    src_rotated = rotate_points(src_center, inital_rotate)
+    src_rotated = rotate_points(src_center, rotation_angle)
     src_rotated = src_rotated[np.argsort(np.arctan2(src_rotated[:,1], src_rotated[:,0]))] # sort by angle. 0 to 2pi
     src_scaled = src_rotated * initial_scale
             
@@ -322,8 +383,12 @@ def stable_affine(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:n
     src_solution = src_scaled
     dst_solution = dst_center
     params = None
+    # params_list = []
     while True:
-        params = estimate_affine(src_solution, dst_solution)
+        params = estimate_affine(src_solution, dst_solution) # shear 정도 확인 필요.
+        # params_list.append(params)
+        # print(*params_list, sep="->\n")
+        # print("")
         transformed_points = affine_transform(params, src_solution)
         squared_residuals = np.sum((transformed_points - dst_solution)**2, axis=1)
         delta = np.mean(squared_residuals)
@@ -338,11 +403,259 @@ def stable_affine(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:n
         src_solution = src_solution[inlier_indices]
         dst_solution = dst_solution[inlier_indices]       
         
-    plt.scatter(affine_transform(params, src_solution)[:, 0], affine_transform(params, src_solution)[:, 1], c='r', s=3)
-    # plt.scatter(transformed_points[:, 0], transformed_points[:, 1], c='r', s=3)
-    plt.scatter(dst_solution[:, 0], dst_solution[:, 1], c='b', s=3)
-    plt.legend(['transformed_src', 'dst'])
+    # plt.scatter(affine_transform(params, src_solution)[:, 0], affine_transform(params, src_solution)[:, 1], c='r', s=3)
+    # # plt.scatter(transformed_points[:, 0], transformed_points[:, 1], c='r', s=3)
+    # plt.scatter(dst_solution[:, 0], dst_solution[:, 1], c='b', s=3)
+    # plt.legend(['transformed_src', 'dst'])
     
-    return params
+    # cv2.warpAffine(obj_img.img, params.reshape(2, 3), (back_img.img.shape[1], back_img.img.shape[0]), back_img.img, borderMode=cv2.BORDER_TRANSPARENT)
+    # plt.imshow(back_img.img)
+    # plt.show()        
     
+    return params, candidate_indices[0], initial_scale # best_params, best_idx, scale
     
+def apply_affine_matrix(back_img:BackgroundImg, best_idx:int, obj_img:ObjectImg, scale:float, params:np.ndarray):
+    result = back_img.img.copy()
+    
+    # Get centers
+    obj_center = obj_img.get_kp_center()
+    hidden_spot_center = np.mean(back_img.get_neighbor_points(best_idx), axis=0)
+    
+    # Crop and resize
+    radius = int(obj_img.radius)
+    start_x = max(int(obj_center[0] - radius), 0)
+    end_x = min(int(obj_center[0] + radius), obj_img.img.shape[0])
+    start_y = max(int(obj_center[1] - radius), 0)
+    end_y = min(int(obj_center[1] + radius), obj_img.img.shape[1])
+    
+    cropped_obj = obj_img.img[start_x:end_x, start_y:end_y]
+    resized_obj = cv2.resize(cropped_obj, (int(cropped_obj.shape[1] * scale), 
+                                         int(cropped_obj.shape[0] * scale)))
+    print("resized_obj: ", resized_obj.shape)
+    
+    h, w = resized_obj.shape[:2]
+    corners = np.array([[0, 0, 1],
+                       [w, 0, 1],
+                       [0, h, 1],
+                       [w, h, 1]]).T
+    
+    # 1. 먼저 affine 변환 적용
+    affine_matrix = params.reshape(2, 3)
+    transformed_corners = affine_matrix @ corners  
+    print(f"transformed_corners: {transformed_corners}")
+    # Calculate bounding box
+    min_x = np.floor(transformed_corners[0].min()).astype(int)
+    max_x = np.ceil(transformed_corners[0].max()).astype(int)
+    min_y = np.floor(transformed_corners[1].min()).astype(int)
+    max_y = np.ceil(transformed_corners[1].max()).astype(int)
+    
+    # Calculate required padding
+    pad_left = abs(min(min_x, 0))
+    pad_right = max(max_x - back_img.img.shape[1], 0)
+    pad_top = abs(min(min_y, 0))
+    pad_bottom = max(max_y - back_img.img.shape[0], 0)
+    
+    # Create padded output size
+    output_width = back_img.img.shape[1] + pad_left + pad_right
+    output_height = back_img.img.shape[0] + pad_top + pad_bottom
+    print(f"output_width: {output_width}, output_height: {output_height}")
+    
+    # Adjust affine matrix for padding
+    affine_matrix_adjusted = affine_matrix.copy()
+    affine_matrix_adjusted[0, 2] += pad_left  # Adjust x translation
+    affine_matrix_adjusted[1, 2] += pad_top   # Adjust y translation
+    
+    print(f"affine_matrix_adjusted: {affine_matrix_adjusted}")
+    
+    affine_transformed = cv2.warpAffine(
+        resized_obj,
+        affine_matrix_adjusted,
+        (output_width, output_height),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_TRANSPARENT
+    )
+    plt.imshow(affine_transformed)
+    plt.title('affine_transformed')
+    plt.show()
+    
+    # 2. affine 변환된 이미지의 중심점 계산
+    resized_center = np.array([resized_obj.shape[1]//2, 
+                               resized_obj.shape[0]//2,
+                                 1])                               
+    affine_center = affine_matrix @ resized_center
+        
+    print("back_img.shape: ", back_img.img.shape)
+    
+    # 3. translation 계산 및 적용
+    translation = hidden_spot_center - affine_center[:2]
+    translation_matrix = np.array([
+        [1, 0, translation[0]],
+        [0, 1, translation[1]]
+    ])
+    
+    # 4. translation 적용
+    final_transformed = cv2.warpAffine(
+        affine_transformed,
+        translation_matrix,
+        (back_img.img.shape[1], back_img.img.shape[0]),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_TRANSPARENT
+    )
+    
+    # Blending
+    if final_transformed.shape[-1] == 4:
+        alpha = final_transformed[:, :, 3] / 255.0
+        alpha = np.expand_dims(alpha, axis=-1)
+        rgb = final_transformed[:, :, :3]
+        result = (rgb * alpha + result * (1 - alpha)).astype(np.uint8)
+    else:
+        mask = cv2.threshold(cv2.cvtColor(final_transformed, cv2.COLOR_BGR2GRAY), 
+                           250, 255, cv2.THRESH_BINARY_INV)[1]
+        mask = cv2.GaussianBlur(mask, (3, 3), 0.5)
+        mask = mask / 255.0
+        mask = np.expand_dims(mask, axis=-1)
+        result = (final_transformed * mask + result * (1 - mask)).astype(np.uint8)
+    plt.imshow(result)
+    # plt.imshow(final_transformed)
+    plt.title('final_transformed')
+    plt.show()
+    return result
+
+# def apply_affine_matrix(back_img:BackgroundImg, best_idx:int, obj_img:ObjectImg, params:np.ndarray):
+#     """
+#     Affine 변환을 적용하고 이미지를 자연스럽게 합성하는 함수
+#     """
+#     # 배경 이미지 크기 확인
+#     back_h, back_w = back_img.img.shape[:2]
+    
+#     # 원본 물체 이미지 크기
+#     orig_h, orig_w = obj_img.img.shape[:2]
+    
+#     # 리사이즈 스케일 계산 (배경 크기의 1/3 정도로)
+#     target_size = min(back_h // 3, back_w // 3)
+#     resize_scale = target_size / max(orig_h, orig_w)
+#     new_size = (int(orig_w * resize_scale), int(orig_h * resize_scale))
+    
+#     # Affine matrix 스케일 조정
+#     # params는 원본 크기 기준으로 계산되었으므로, 리사이즈 비율만큼 조정
+#     scaled_matrix = params.reshape(2, 3).copy()
+    
+#     # scaling/rotation 성분 조정 (대각 성분)
+#     scaled_matrix[0, 0] *= resize_scale
+#     scaled_matrix[0, 1] *= resize_scale
+#     scaled_matrix[1, 0] *= resize_scale
+#     scaled_matrix[1, 1] *= resize_scale
+    
+#     # 물체 이미지 리사이즈
+#     resized_obj = cv2.resize(obj_img.img, new_size)
+    
+#     # Get hidden spot center
+#     hidden_spot_center = np.mean(back_img.get_neighbor_points(best_idx), axis=0)
+    
+#     # Translation matrix 생성 (hidden spot으로 이동)
+#     h, w = resized_obj.shape[:2]
+#     translation = np.array([
+#         [1, 0, hidden_spot_center[0] - w//2],
+#         [0, 1, hidden_spot_center[1] - h//2]
+#     ], dtype=np.float32)
+    
+#     # Final transformation matrix
+#     final_matrix = scaled_matrix.dot(np.vstack((translation, [0, 0, 1])))[:2]
+    
+#     # Apply transformation
+#     result = back_img.img.copy()
+#     transformed_obj = cv2.warpAffine(
+#         resized_obj,
+#         final_matrix,
+#         (back_w, back_h),
+#         flags=cv2.INTER_LINEAR,
+#         borderMode=cv2.BORDER_TRANSPARENT
+#     )
+    
+#     # Blend images (나머지 블렌딩 코드는 동일)
+#     if transformed_obj.shape[-1] == 4:
+#         # Handle RGBA images
+#         alpha = transformed_obj[:, :, 3] / 255.0
+#         alpha = np.expand_dims(alpha, axis=-1)
+#         rgb = transformed_obj[:, :, :3]
+#         result = (rgb * alpha + result * (1 - alpha)).astype(np.uint8)
+#     else:
+#         # Handle RGB images by removing white background
+#         mask = cv2.threshold(cv2.cvtColor(transformed_obj, cv2.COLOR_BGR2GRAY), 
+#                            250, 255, cv2.THRESH_BINARY_INV)[1]
+#         mask = cv2.GaussianBlur(mask, (5, 5), 0)
+#         mask = mask / 255.0
+#         mask = np.expand_dims(mask, axis=-1)
+#         result = (transformed_obj * mask + result * (1 - mask)).astype(np.uint8)
+        
+#     plt.imshow(result)
+    
+#     return result        
+
+# def apply_affine_matrix(back_img:BackgroundImg, best_idx:int, obj_img:ObjectImg, params:np.ndarray):
+    # 배경 이미지 크기 확인
+#     back_h, back_w = back_img.img.shape[:2]
+#     orig_h, orig_w = obj_img.img.shape[:2]
+    
+#     # 리사이즈 스케일 계산 (배경 크기의 1/3 정도로)
+#     target_size = min(back_h // 3, back_w // 3)
+#     resize_scale = target_size / max(orig_h, orig_w)
+#     new_size = (int(orig_w * resize_scale), int(orig_h * resize_scale))
+    
+#     # 1. 먼저 hidden spot center로 이동
+#     hidden_spot_center = np.mean(back_img.get_neighbor_points(best_idx), axis=0)
+    
+#     # 2. Translation matrix 생성
+#     translation = np.array([
+#         [1, 0, hidden_spot_center[0]],
+#         [0, 1, hidden_spot_center[1]],
+#         [0, 0, 1]
+#     ], dtype=np.float32)
+    
+#     # 3. Scale matrix 생성 (대각 성분 수정)
+#     scaled_matrix = params.reshape(2, 3).copy()
+#     scaled_matrix[0, 0] *= resize_scale    
+#     scaled_matrix[1, 1] *= resize_scale
+    
+#     # Scale matrix를 3x3으로 확장
+#     scale_matrix = np.vstack((scaled_matrix, [0, 0, 1]))
+    
+#     # 4. 최종 변환 행렬 계산 (translation -> scale 순서)
+#     final_matrix = scale_matrix.dot(translation)[:2]
+    
+#     # 5. 물체 이미지 리사이즈
+#     resized_obj = cv2.resize(obj_img.img, new_size, interpolation=cv2.INTER_AREA)
+    
+#     # 6. 변환 적용
+#     result = back_img.img.copy()
+#     transformed_obj = cv2.warpAffine(
+#         resized_obj,
+#         final_matrix,
+#         (back_w, back_h),
+#         flags=cv2.INTER_LINEAR,
+#         borderMode=cv2.BORDER_TRANSPARENT
+#     )
+    
+#     # 7. 블렌딩 개선
+#     if transformed_obj.shape[-1] == 4:
+#         alpha = transformed_obj[:, :, 3] / 255.0
+#         alpha = np.expand_dims(alpha, axis=-1)
+#         rgb = transformed_obj[:, :, :3]
+#         result = (rgb * alpha + result * (1 - alpha)).astype(np.uint8)
+#     else:
+#         # 더 강건한 마스크 생성
+#         gray = cv2.cvtColor(transformed_obj, cv2.COLOR_BGR2GRAY)
+#         _, mask = cv2.threshold(gray, 250, 255, cv2.THRESH_BINARY_INV)
+#         mask = cv2.GaussianBlur(mask, (5, 5), 0)
+        
+#         # 마스크 경계 부드럽게
+#         kernel = np.ones((3,3), np.uint8)
+#         mask = cv2.erode(mask, kernel, iterations=1)
+#         mask = cv2.GaussianBlur(mask, (5, 5), 0)
+        
+#         mask = mask / 255.0
+#         mask = np.expand_dims(mask, axis=-1)
+#         result = (transformed_obj * mask + result * (1 - mask)).astype(np.uint8)
+#     plt.imshow(result)
+#     plt.show()
+#     return result

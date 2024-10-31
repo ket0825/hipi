@@ -1,7 +1,7 @@
 # 한 번 추적해가며 디버깅 해보기
 from img_class.background_img import BackgroundImg
 from img_class.object_img import ObjectImg
-from utils.shape_match_utils import compute_refined_score, interpolate_feature_scores, visualize_results, ransac_affine, stable_affine
+from utils.shape_match_utils import compute_refined_score, interpolate_feature_scores, visualize_results, ransac_affine, stable_affine, apply_affine_matrix, transform_object
 import time
 
 DEBUG = True
@@ -43,11 +43,12 @@ if DEBUG:
 print(min(scores), max(scores))
 
 candidate_indices = back_img.get_candidates_indices(scores, NUM_OF_CANDIDATES)
-
+print(f"candidate_indices: {candidate_indices}")
 # affine_matrix = ransac_affine(back_img, obj_img, candidate_indices, 1000, mad_factor=1, mad_threshold=1)
 # print(affine_matrix)
-affine_matrix = stable_affine(back_img, obj_img, candidate_indices)
-
+affine_matrix, best_idx, scale = stable_affine(back_img, obj_img, candidate_indices)
+# affine_matrix = transform_object(back_img, obj_img, candidate_indices)
+result = apply_affine_matrix(back_img, best_idx, obj_img, scale, affine_matrix)
 
 
 # For score visualization

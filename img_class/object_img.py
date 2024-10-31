@@ -98,5 +98,9 @@ class ObjectImg(ImgBase):
         angle_indices = (angles / (360 / self._num_angle_divisions)).astype(int)
         self.histogram = np.zeros((self._num_radius_divisions, self._num_angle_divisions), dtype=int)
         np.add.at(self.histogram, (radius_indices, angle_indices), 1)
+    
+    @set_timer()
+    def get_kp_center(self):
+        return np.mean(np.array([kp.pt for kp in self.kp1]), axis=0)
                 
         
