@@ -1,3 +1,5 @@
+# shape_match_utils.py: shape matching 관련 유틸 함수들을 정의한 파일
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import Rbf
@@ -160,7 +162,20 @@ def affine_transform(params, points):
     return np.column_stack((a*x + b*y + c, d*x + e*y + f))
 
 def estimate_affine(src_points, dst_points):
-    """Estimate affine transformation using least squares."""
+    """
+    Estimate affine transformation using least squares.
+    
+    affine without scaling: a, b, c, 
+                            d, e, f
+    
+    Rotate: cos(theta), -sin(theta), 0
+            sin(theta), cos(theta), 0
+    shear: 0, s, 0
+            t, 0, 0
+    shear 정도 통제 => a^2 + b^2 - 1 = x축으로의 변환 정도
+                        c^2 + d^2 - 1 = y축으로의 변환 정도
+    """
+    
     A = np.column_stack((src_points, np.ones(src_points.shape[0])))    
     B = dst_points    
     params, _, _, _ = np.linalg.lstsq(A, B, rcond=None)    
@@ -377,15 +392,15 @@ def stable_affine(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:n
     plt.scatter(src_scaled[:, 0], src_scaled[:, 1], c='r', s=3)
     plt.scatter(dst_center[:, 0], dst_center[:, 1], c='b', s=3)
     plt.legend(['src_scaled', 'dst'])
-    plt.title('scaled points')
+    plt.title('scaled and rotated src')
     plt.show()
-    
+            
     src_solution = src_scaled
     dst_solution = dst_center
     params = None
     # params_list = []
     while True:
-        params = estimate_affine(src_solution, dst_solution) # shear 정도 확인 필요.
+        params = estimate_affine(src_solution, dst_solution) #TODO: shear 정도 확인 필요.
         # params_list.append(params)
         # print(*params_list, sep="->\n")
         # print("")
@@ -403,10 +418,11 @@ def stable_affine(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:n
         src_solution = src_solution[inlier_indices]
         dst_solution = dst_solution[inlier_indices]       
         
-    # plt.scatter(affine_transform(params, src_solution)[:, 0], affine_transform(params, src_solution)[:, 1], c='r', s=3)
-    # # plt.scatter(transformed_points[:, 0], transformed_points[:, 1], c='r', s=3)
-    # plt.scatter(dst_solution[:, 0], dst_solution[:, 1], c='b', s=3)
-    # plt.legend(['transformed_src', 'dst'])
+    plt.scatter(affine_transform(params, src_solution)[:, 0], affine_transform(params, src_solution)[:, 1], c='r', s=3)
+    # plt.scatter(transformed_points[:, 0], transformed_points[:, 1], c='r', s=3)
+    plt.scatter(dst_solution[:, 0], dst_solution[:, 1], c='b', s=3)
+    plt.legend(['transformed_src', 'dst'])
+    plt.show()
     
     # cv2.warpAffine(obj_img.img, params.reshape(2, 3), (back_img.img.shape[1], back_img.img.shape[0]), back_img.img, borderMode=cv2.BORDER_TRANSPARENT)
     # plt.imshow(back_img.img)
@@ -421,6 +437,7 @@ def apply_affine_matrix(back_img:BackgroundImg, best_idx:int, obj_img:ObjectImg,
     obj_center = obj_img.get_kp_center()
     hidden_spot_center = np.mean(back_img.get_neighbor_points(best_idx), axis=0)
     
+    
     # Crop and resize
     radius = int(obj_img.radius)
     start_x = max(int(obj_center[0] - radius), 0)
@@ -429,8 +446,8 @@ def apply_affine_matrix(back_img:BackgroundImg, best_idx:int, obj_img:ObjectImg,
     end_y = min(int(obj_center[1] + radius), obj_img.img.shape[1])
     
     cropped_obj = obj_img.img[start_x:end_x, start_y:end_y]
-    resized_obj = cv2.resize(cropped_obj, (int(cropped_obj.shape[1] * scale), 
-                                         int(cropped_obj.shape[0] * scale)))
+    resized_obj = cv2.resize(cropped_obj, (int(cropped_obj.shape[1] * scale * obj_img.resized_shape[1]), 
+                                         int(cropped_obj.shape[0] * scale * obj_img.resized_shape[0])))
     print("resized_obj: ", resized_obj.shape)
     
     h, w = resized_obj.shape[:2]
