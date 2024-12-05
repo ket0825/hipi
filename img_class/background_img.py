@@ -54,18 +54,19 @@ class BackgroundImg(ImgBase):
         # edge-preserving filter
         filtered = cv2.bilateralFilter(gray, -1, 10, 5)
         
-        plt.imshow(filtered)
-        plt.title('filtered')
-        plt.show()
+        if getattr(self, f"_set_orb_debug"):            
+            plt.imshow(filtered)
+            plt.title('filtered')
+            plt.show()
                 
         # sharpening kernel. kernel에 따라 blur of sharpening이 결정됨.
         sharpened = cv2.filter2D(filtered, -1, np.array([[-1, -1, -1], 
                                                          [-1, 9, -1], 
                                                          [-1, -1, -1]]))
-        
-        plt.imshow(sharpened)
-        plt.title('sharpened')
-        plt.show()
+        if getattr(self, f"_set_orb_debug"):
+            plt.imshow(sharpened)
+            plt.title('sharpened')
+            plt.show()
         
         # # 적응형 임계값 처리. 오히려 아우라가 생겨 성능 감소.
         # thresh = cv2.adaptiveThreshold(
