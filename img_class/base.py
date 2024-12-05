@@ -21,7 +21,19 @@ class ImgBase:
     
     def __init__(self, src:os.PathLike, num_radius_divisions=4, num_angle_divisions=8, debug:bool = False):
         self.src = src
-        self.img = cv2.imread(src)
+        # self.img = cv2.cvtColor(cv2.imread(src), cv2.COLOR_BGR2RGB)
+        
+        # IMREAD_UNCHANGED로 알파 채널 포함해서 읽기 (alpha가 0인 것이 투명한 배경)
+        img_with_alpha = cv2.imread(src, cv2.IMREAD_UNCHANGED)
+        if img_with_alpha.shape[2] == 3: # 알파 채널이 없는 경우
+            self.img = cv2.cvtColor(img_with_alpha, cv2.COLOR_BGR2RGB)
+        else:            
+            self.img = cv2.cvtColor(img_with_alpha[:,:,:3], cv2.COLOR_BGR2RGB)
+            # # 알파 채널로 마스크 생성
+            self.mask = img_with_alpha[:,:,3] > 0
+            self.mask_color = [255, 255, 255]
+            # # 마스크 적용하여 배경 제거
+            self.img[~self.mask] = self.mask_color  # 또는 원하는 배경색
         self.debug = debug
         self.__class__._num_radius_divisions = num_radius_divisions
         self.__class__._num_angle_divisions = num_angle_divisions
