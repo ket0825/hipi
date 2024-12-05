@@ -32,7 +32,7 @@ def improved_similarity_measure(back_hist, obj_hist, num_angle_divisions, w1=0.7
        w2: 분포의 집중도에 대한 가중치        
        """
        # 1. 기존의 bin-wise 유사도. TODO: 사용한다면 rotation 고려 필요!
-       bin_similarity = compute_similarity(back_hist, obj_hist)
+       bin_similarity = compute_similarity(back_hist, obj_hist)       
        
        # 2. 분포의 집중도 고려
        concentration1 = np.sum(back_hist**2) / np.sum(back_hist)**2
@@ -349,6 +349,78 @@ def transform_object(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indice
     
     return affine_matrix
 
+def localize_object(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:np.ndarray):
+    # src_points: object image keypoints
+    src_points = np.array([kp.pt for kp in obj_img.kp1])    
+    # dst_points: background image keypoints
+    dst_points = np.array([kp.pt for kp in back_img.kp1])[back_img.N_nn_indices[candidate_indices]] # shape: (len(candidate_indices) x N x 2)    
+    # 후보군에 따른 추가 계산이 필요하다면 이후에 추가
+    dst_points = dst_points[0, :, :] # shape: (N x 2)                
+
+    # 고려해야 할 것.
+    # 1. src PCA 주성분이 음수인 경우
+    # 2. dst PCA 주성분이 음수인 경우
+    # 3. rotate된 src PCA 주성분이 음수인 경우
+
+    initial_scales = back_img.radii[candidate_indices] / obj_img.radius    
+    back_pca_components = np.array([back_img.pca_class_list[idx].components_[0] for idx in candidate_indices])
+    # back_img에서의 매칭 포인트의 중앙점
+    back_kps_center = np.array([back_img.pca_class_list[idx].mean_ for idx in candidate_indices])
+    rotation_angles = np.arccos(np.dot(back_pca_components, obj_img.pca.components_[0]))
+    where_rotates = np.where(back_img.is_rotated[candidate_indices])[0] # 반 바퀴 회전한 경우 확인.
+    rotation_angles[where_rotates] = rotation_angles[where_rotates] + np.pi # 반 바퀴 회전시킴
+    
+    plt.imshow(back_img.img)
+    plt.scatter(dst_points[:, 0], dst_points[:, 1], c='b', s=3)    
+    plt.show()
+        
+    # 후보군에 따른 추가 계산이 필요하다면 이후에 추가
+    rotation_angle = rotation_angles[0]
+    initial_scale = initial_scales[0]            
+    # back_img에서의 매칭 포인트의 중앙점    
+    back_kp_center = back_kps_center[0]    
+        
+    # TODO: 화질 이슈로 인하여 원본 img를 이용하자 (현재는 1/3된 이미지임)
+    # object_img을 회전 및 스케일링
+    M = cv2.getRotationMatrix2D((obj_img.img.shape[1]//2, obj_img.img.shape[0]//2), rotation_angle * 180 / np.pi, initial_scale)    
+    # back_img에서의 매칭 포인트의 중앙점과 object_img의 중앙점을 일치시키기 위한 translation 계산
+    obj_center = obj_img.get_kp_center()
+    shift = back_kp_center - obj_center
+    M[0, 2] += shift[0]
+    M[1, 2] += shift[1]
+    # object_img를 회전 및 스케일링한 이미지를 생성
+    # canvas = np.zeros(back_img.img.shape, dtype=np.uint8)    
+    # transformed_img = cv2.warpAffine(obj_img.img, M, (back_img.img.shape[1], back_img.img.shape[0]), dst=canvas, borderMode=cv2.BORDER_TRANSPARENT)    
+    # canvas = np.zeros(back_img.img.shape, dtype=np.uint8)
+    # 1. 먼저 변환된 이미지 생성
+    result_img = back_img.img.copy()
+    transformed_obj = cv2.warpAffine(obj_img.img, M, 
+                                    (back_img.img.shape[1], back_img.img.shape[0]),
+                                    dst=result_img,
+                                    flags=cv2.INTER_LINEAR,
+                                    borderMode=cv2.BORDER_TRANSPARENT)
+
+    # 2. 흰색 배경 마스킹 (RGB 값이 모두 높은 픽셀을 찾음)
+    # 각 채널이 예를 들어 250 이상인 픽셀을 흰색으로 간주
+    white_threshold = 250
+    transformed_mask = np.all(transformed_obj >= white_threshold, axis=-1)
+
+    # 3. 결과 이미지 생성
+    result_img = transformed_obj.copy()
+    result_img[transformed_mask] = back_img.img[transformed_mask]
+    
+    cv2.imwrite('combined.png', cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB))
+
+    plt.imshow(result_img)
+    plt.title('transformed_img')
+    plt.show()
+        
+    # transformed_img = cv2.warpAffine(obj_img.img, M, (back_img.img.shape[1], back_img.img.shape[0]), dst=back_img.img, borderMode=cv2.BORDER_TRANSPARENT)
+    # plt.imshow(transformed_img)
+    # plt.title('transformed_img')
+    # plt.show()
+    
+
 def stable_affine(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:np.ndarray):
     """
     iterative stable affine transformation.                        
@@ -368,8 +440,8 @@ def stable_affine(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:n
     initial_scales = back_img.radii[candidate_indices] / obj_img.radius    
     back_pca_components = np.array([back_img.pca_class_list[idx].components_[0] for idx in candidate_indices])
     rotation_angles = np.arccos(np.dot(back_pca_components, obj_img.pca.components_[0]))
-    where_rotates = np.where(back_img.is_rotated[candidate_indices])[0]
-    rotation_angles[where_rotates] = rotation_angles[where_rotates] + np.pi        
+    where_rotates = np.where(back_img.is_rotated[candidate_indices])[0] # 반 바퀴 회전한 경우 확인.
+    rotation_angles[where_rotates] = rotation_angles[where_rotates] + np.pi # 반 바퀴 회전시킴
     
     plt.imshow(back_img.img)    
     plt.scatter(dst_points[:, 0], dst_points[:, 1], c='b', s=3)    
@@ -382,8 +454,8 @@ def stable_affine(back_img:BackgroundImg, obj_img:ObjectImg, candidate_indices:n
     # center points
     src_center = centerize_points(src_points)
     dst_center = centerize_points(dst_points)
-    dst_center = dst_center[np.argsort(np.arctan2(dst_center[:,1], dst_center[:,0]))] # sort by angle. 0 to 2pi
-    
+    dst_center = dst_center[np.argsort(np.arctan2(dst_center[:,1], dst_center[:,0]))] # sort by angle. 0 to 2pi    
+    # 일단 그냥 사진을 그 위치로 이동만 시키고, 아핀 변환까지는 하지말자. rotation과 resize만 하자.
     # rotate points
     src_rotated = rotate_points(src_center, rotation_angle)
     src_rotated = src_rotated[np.argsort(np.arctan2(src_rotated[:,1], src_rotated[:,0]))] # sort by angle. 0 to 2pi
@@ -446,17 +518,16 @@ def apply_affine_matrix(back_img:BackgroundImg, best_idx:int, obj_img:ObjectImg,
     end_y = min(int(obj_center[1] + radius), obj_img.img.shape[1])
     
     cropped_obj = obj_img.img[start_x:end_x, start_y:end_y]
-    resized_obj = cv2.resize(cropped_obj, (int(cropped_obj.shape[1] * scale * obj_img.resized_shape[1]), 
-                                         int(cropped_obj.shape[0] * scale * obj_img.resized_shape[0])))
-    print("resized_obj: ", resized_obj.shape)
     
-    h, w = resized_obj.shape[:2]
+    print("cropped_obj: ", cropped_obj.shape)
+    
+    h, w = cropped_obj.shape[:2]
     corners = np.array([[0, 0, 1],
                        [w, 0, 1],
                        [0, h, 1],
                        [w, h, 1]]).T
     
-    # 1. 먼저 affine 변환 적용
+    # 1. 먼저 corner에 대한 affine 변환 적용
     affine_matrix = params.reshape(2, 3)
     transformed_corners = affine_matrix @ corners  
     print(f"transformed_corners: {transformed_corners}")
@@ -485,7 +556,7 @@ def apply_affine_matrix(back_img:BackgroundImg, best_idx:int, obj_img:ObjectImg,
     print(f"affine_matrix_adjusted: {affine_matrix_adjusted}")
     
     affine_transformed = cv2.warpAffine(
-        resized_obj,
+        cropped_obj,
         affine_matrix_adjusted,
         (output_width, output_height),
         flags=cv2.INTER_LINEAR,
@@ -496,10 +567,10 @@ def apply_affine_matrix(back_img:BackgroundImg, best_idx:int, obj_img:ObjectImg,
     plt.show()
     
     # 2. affine 변환된 이미지의 중심점 계산
-    resized_center = np.array([resized_obj.shape[1]//2, 
-                               resized_obj.shape[0]//2,
+    cropped_center = np.array([cropped_obj.shape[1]//2, 
+                               cropped_obj.shape[0]//2,
                                  1])                               
-    affine_center = affine_matrix @ resized_center
+    affine_center = affine_matrix @ cropped_center
         
     print("back_img.shape: ", back_img.img.shape)
     
@@ -537,142 +608,3 @@ def apply_affine_matrix(back_img:BackgroundImg, best_idx:int, obj_img:ObjectImg,
     plt.title('final_transformed')
     plt.show()
     return result
-
-# def apply_affine_matrix(back_img:BackgroundImg, best_idx:int, obj_img:ObjectImg, params:np.ndarray):
-#     """
-#     Affine 변환을 적용하고 이미지를 자연스럽게 합성하는 함수
-#     """
-#     # 배경 이미지 크기 확인
-#     back_h, back_w = back_img.img.shape[:2]
-    
-#     # 원본 물체 이미지 크기
-#     orig_h, orig_w = obj_img.img.shape[:2]
-    
-#     # 리사이즈 스케일 계산 (배경 크기의 1/3 정도로)
-#     target_size = min(back_h // 3, back_w // 3)
-#     resize_scale = target_size / max(orig_h, orig_w)
-#     new_size = (int(orig_w * resize_scale), int(orig_h * resize_scale))
-    
-#     # Affine matrix 스케일 조정
-#     # params는 원본 크기 기준으로 계산되었으므로, 리사이즈 비율만큼 조정
-#     scaled_matrix = params.reshape(2, 3).copy()
-    
-#     # scaling/rotation 성분 조정 (대각 성분)
-#     scaled_matrix[0, 0] *= resize_scale
-#     scaled_matrix[0, 1] *= resize_scale
-#     scaled_matrix[1, 0] *= resize_scale
-#     scaled_matrix[1, 1] *= resize_scale
-    
-#     # 물체 이미지 리사이즈
-#     resized_obj = cv2.resize(obj_img.img, new_size)
-    
-#     # Get hidden spot center
-#     hidden_spot_center = np.mean(back_img.get_neighbor_points(best_idx), axis=0)
-    
-#     # Translation matrix 생성 (hidden spot으로 이동)
-#     h, w = resized_obj.shape[:2]
-#     translation = np.array([
-#         [1, 0, hidden_spot_center[0] - w//2],
-#         [0, 1, hidden_spot_center[1] - h//2]
-#     ], dtype=np.float32)
-    
-#     # Final transformation matrix
-#     final_matrix = scaled_matrix.dot(np.vstack((translation, [0, 0, 1])))[:2]
-    
-#     # Apply transformation
-#     result = back_img.img.copy()
-#     transformed_obj = cv2.warpAffine(
-#         resized_obj,
-#         final_matrix,
-#         (back_w, back_h),
-#         flags=cv2.INTER_LINEAR,
-#         borderMode=cv2.BORDER_TRANSPARENT
-#     )
-    
-#     # Blend images (나머지 블렌딩 코드는 동일)
-#     if transformed_obj.shape[-1] == 4:
-#         # Handle RGBA images
-#         alpha = transformed_obj[:, :, 3] / 255.0
-#         alpha = np.expand_dims(alpha, axis=-1)
-#         rgb = transformed_obj[:, :, :3]
-#         result = (rgb * alpha + result * (1 - alpha)).astype(np.uint8)
-#     else:
-#         # Handle RGB images by removing white background
-#         mask = cv2.threshold(cv2.cvtColor(transformed_obj, cv2.COLOR_BGR2GRAY), 
-#                            250, 255, cv2.THRESH_BINARY_INV)[1]
-#         mask = cv2.GaussianBlur(mask, (5, 5), 0)
-#         mask = mask / 255.0
-#         mask = np.expand_dims(mask, axis=-1)
-#         result = (transformed_obj * mask + result * (1 - mask)).astype(np.uint8)
-        
-#     plt.imshow(result)
-    
-#     return result        
-
-# def apply_affine_matrix(back_img:BackgroundImg, best_idx:int, obj_img:ObjectImg, params:np.ndarray):
-    # 배경 이미지 크기 확인
-#     back_h, back_w = back_img.img.shape[:2]
-#     orig_h, orig_w = obj_img.img.shape[:2]
-    
-#     # 리사이즈 스케일 계산 (배경 크기의 1/3 정도로)
-#     target_size = min(back_h // 3, back_w // 3)
-#     resize_scale = target_size / max(orig_h, orig_w)
-#     new_size = (int(orig_w * resize_scale), int(orig_h * resize_scale))
-    
-#     # 1. 먼저 hidden spot center로 이동
-#     hidden_spot_center = np.mean(back_img.get_neighbor_points(best_idx), axis=0)
-    
-#     # 2. Translation matrix 생성
-#     translation = np.array([
-#         [1, 0, hidden_spot_center[0]],
-#         [0, 1, hidden_spot_center[1]],
-#         [0, 0, 1]
-#     ], dtype=np.float32)
-    
-#     # 3. Scale matrix 생성 (대각 성분 수정)
-#     scaled_matrix = params.reshape(2, 3).copy()
-#     scaled_matrix[0, 0] *= resize_scale    
-#     scaled_matrix[1, 1] *= resize_scale
-    
-#     # Scale matrix를 3x3으로 확장
-#     scale_matrix = np.vstack((scaled_matrix, [0, 0, 1]))
-    
-#     # 4. 최종 변환 행렬 계산 (translation -> scale 순서)
-#     final_matrix = scale_matrix.dot(translation)[:2]
-    
-#     # 5. 물체 이미지 리사이즈
-#     resized_obj = cv2.resize(obj_img.img, new_size, interpolation=cv2.INTER_AREA)
-    
-#     # 6. 변환 적용
-#     result = back_img.img.copy()
-#     transformed_obj = cv2.warpAffine(
-#         resized_obj,
-#         final_matrix,
-#         (back_w, back_h),
-#         flags=cv2.INTER_LINEAR,
-#         borderMode=cv2.BORDER_TRANSPARENT
-#     )
-    
-#     # 7. 블렌딩 개선
-#     if transformed_obj.shape[-1] == 4:
-#         alpha = transformed_obj[:, :, 3] / 255.0
-#         alpha = np.expand_dims(alpha, axis=-1)
-#         rgb = transformed_obj[:, :, :3]
-#         result = (rgb * alpha + result * (1 - alpha)).astype(np.uint8)
-#     else:
-#         # 더 강건한 마스크 생성
-#         gray = cv2.cvtColor(transformed_obj, cv2.COLOR_BGR2GRAY)
-#         _, mask = cv2.threshold(gray, 250, 255, cv2.THRESH_BINARY_INV)
-#         mask = cv2.GaussianBlur(mask, (5, 5), 0)
-        
-#         # 마스크 경계 부드럽게
-#         kernel = np.ones((3,3), np.uint8)
-#         mask = cv2.erode(mask, kernel, iterations=1)
-#         mask = cv2.GaussianBlur(mask, (5, 5), 0)
-        
-#         mask = mask / 255.0
-#         mask = np.expand_dims(mask, axis=-1)
-#         result = (transformed_obj * mask + result * (1 - mask)).astype(np.uint8)
-#     plt.imshow(result)
-#     plt.show()
-#     return result
