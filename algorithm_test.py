@@ -1,5 +1,14 @@
+# sweep line algorithm
+# 1. heapq.heappop(max_pq) # (score, index)
+# 2. 해당 후보지의 index에 대한 bbox를 가져옴.
+# 3. bbox를 기준으로 x와 y에 대한 sweep line을 그림.
+# 4. 만약 bbox가 겹치는 경우, 해당 후보지의 다음 점수를 가져오고, current를 1 증가시킴.
+# 5. 다시 heapq.heappush(max_pq, (score, index))를 수행.
+# 6  heapq가 비어있거나, current가 candidate_len를 초과할 때 까지 1~5를 반복.
 import heapq
 # 3개. 3개의 후보지에 따른 점수, 3개의 후보지의 bbox를 지님.
+image_width = 100
+image_height = 100
 
 score_bbox_candidates = [
     {
@@ -28,15 +37,6 @@ for i in range(candidate_len):
     heapq.heappush(max_pq, (-score_bbox_candidates[i]["scores"][0], i)) # i는 후보지의 index
 print(max_pq)
 
-# sweep line algorithm
-# 1. heapq.heappop(max_pq) # (score, index)
-# 2. 해당 후보지의 index에 대한 bbox를 가져옴.
-# 3. bbox를 기준으로 x와 y에 대한 sweep line을 그림.
-# 4. 만약 bbox가 겹치는 경우, 해당 후보지의 다음 점수를 가져오고, current를 1 증가시킴.
-# 5. 다시 heapq.heappush(max_pq, (score, index))를 수행.
-# 6  heapq가 비어있거나, current가 candidate_len를 초과할 때 까지 1~5를 반복.
-image_width = 100
-image_height = 100
 occupied_ranges = {
     'x': [],
     'y': []
@@ -74,15 +74,3 @@ while max_pq:
 
 for item in score_bbox_candidates:
     print(f'현재 score: {item["scores"][item["current"]]}, 현재 bbox: {item["bbox"][item["current"]]}')
-    
-
-    
-    
-    
-
-
-
-
-
-
-
