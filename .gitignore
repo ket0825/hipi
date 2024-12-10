@@ -2,3 +2,10 @@
 *.pyc
 *.lock
 *.png
+**/__pycache__/
+.vscode/
+poetry.lock
+
+# test cache
+.pytest_cache/
+deploy/milvus/volumes/
