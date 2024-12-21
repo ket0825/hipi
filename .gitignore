@@ -5,6 +5,7 @@
 **/__pycache__/
 .vscode/
 poetry.lock
+*.env
 
 # test cache
 .pytest_cache/
