@@ -31,7 +31,7 @@ class BackgroundImg(ImgBase):
         return "BackgroundImg" if not hasattr(self, "src") else f"BackgroundImg - {self.src} "
     
     def __init__(self, src:os.PathLike):
-        super().__init__(src, num_radius_divisions=4, num_angle_divisions=8)
+        super().__init__(src, num_radius_divisions=5, num_angle_divisions=12)
         
     @set_timer()
     def set_orb(self, nfeatures:int, nms_distance=3):
@@ -45,10 +45,7 @@ class BackgroundImg(ImgBase):
         # 이미지 크기에 따른 파라미터 계산
         min_dim = min(self.img.shape[0], self.img.shape[1])        
         nms_distance = max(nms_distance, min_dim // DELIMINATOR)
-        print(f"nms_distance: {nms_distance}")
-                                
-        # blur된 이미지를 gray로 변환 (바로 gray로 변환하지 않음)        
-        gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)             
+        print(f"nms_distance: {nms_distance}")                                        
 
         gray = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
         # edge-preserving filter
@@ -103,15 +100,18 @@ class BackgroundImg(ImgBase):
             scoreType=cv2.ORB_HARRIS_SCORE, 
             patchSize=31, # edgeThreshold와 크거나 같은 값으로 설정해야 함.
             fastThreshold=10, # FAST detector에서 근처 픽셀들이 얼마나 밝거나 어두워야 하는지에 대한 임계값
-        )
+        )        
 
         self.kp1, _ = orb.detectAndCompute(sharpened, None)
+        print(f"일차 추출: {len(self.kp1)}")
         self.kp1 = ImgBase.non_max_suppression(self.kp1, nms_distance)
+        print(f"NMS이후 추출: {len(self.kp1)}")
         if getattr(self, f"_set_orb_debug"):
+            circle_size = min(self.img.shape[:2]) // 200
             result = self.img.copy()
             for kp in self.kp1:
                 x, y = kp.pt
-                cv2.circle(result, (int(x), int(y)), 1, (255, 0, 0), -1)
+                cv2.circle(result, (int(x), int(y)), 2, (255, 0, 0), -1)
                 
             plt.imshow(result)
             plt.title(f'Background image orb\nnfeatures: {nfeatures}\nnms_distance: {nms_distance}')

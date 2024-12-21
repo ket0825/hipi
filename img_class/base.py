@@ -16,10 +16,10 @@ class ImgBase:
     - _num_angle_divisions
     
     """
-    _num_radius_divisions = 4
-    _num_angle_divisions = 8
+    _num_radius_divisions = 5
+    _num_angle_divisions = 12
     
-    def __init__(self, src:os.PathLike, num_radius_divisions=4, num_angle_divisions=8, debug:bool = False):
+    def __init__(self, src:os.PathLike, num_radius_divisions=5, num_angle_divisions=12, debug:bool = False):
         self.src = src
         # self.img = cv2.cvtColor(cv2.imread(src), cv2.COLOR_BGR2RGB)
         

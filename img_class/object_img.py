@@ -32,7 +32,7 @@ class ObjectImg(ImgBase):
         return "ObjectImg" if not hasattr(self, "src") else f"ObjectImg - {self.src} "
     
     def __init__(self, src:os.PathLike):
-        super().__init__(src, num_radius_divisions=4, num_angle_divisions=8)
+        super().__init__(src, num_radius_divisions=5, num_angle_divisions=12)
 
     # TODO: 난이도, 시간 등 다양한 변인을 고려하여 target_size를 조정해야 함.
     def set_resize_scale(self, background_img: BackgroundImg):
@@ -66,8 +66,7 @@ class ObjectImg(ImgBase):
         removebg 처리하니 edgeThreshold 높아도 좋음.
         얇은 구조에 대해서 너무 많은 특징점이 검출되는 것을 방지하기 위해(clustering) non-maximum suppression을 사용함.
         nfeature에 따라 너무 적은 특징점이 나오는 경우 존재.
-        """
-        
+        """                
         DELIMINATOR = 33                        
         
         # 이미지 크기에 따른 파라미터 계산
@@ -90,9 +89,31 @@ class ObjectImg(ImgBase):
             plt.title('edges')
             plt.show()
         
+        # orb = cv2.ORB()
+        # orb = orb.create(
+        #     nfeatures=nfeatures, # 상위 몇개의 특징점을 사용할 것인지
+        #     scaleFactor=1.2, 
+        #     nlevels=8,
+        #     edgeThreshold=orb_edgeThreshold,
+        #     # Backgroud image는 이 값을 줄여야 함.
+        #     firstLevel=0,
+        #     WTA_K=2, # BRIEF descriptor가 사용할 bit 가짓수. binary이므로 1bit임.
+        #     scoreType=cv2.ORB_HARRIS_SCORE, 
+        #     patchSize=orb_patchSize,
+        #     fastThreshold=10, # FAST detector에서 근처 픽셀들이 얼마나 밝거나 어두워야 하는지에 대한 임계값
+        # )
+        # self.kp1, _ = orb.detectAndCompute(edges, None)
+        
+        contour_features = int(nfeatures * 0.7)  # 70% for contour
+        internal_features = nfeatures - contour_features
+        
+        # Get contour region
+        dilated_edges = cv2.dilate(edges, np.ones((3,3), np.uint8), iterations=1)
+        
+        # Detect features in contour region
         orb = cv2.ORB()
-        orb = orb.create(
-            nfeatures=nfeatures, # 상위 몇개의 특징점을 사용할 것인지
+        orb_contour = orb.create(
+            nfeatures=contour_features, # 상위 몇개의 특징점을 사용할 것인지
             scaleFactor=1.2, 
             nlevels=8,
             edgeThreshold=orb_edgeThreshold,
@@ -102,9 +123,67 @@ class ObjectImg(ImgBase):
             scoreType=cv2.ORB_HARRIS_SCORE, 
             patchSize=orb_patchSize,
             fastThreshold=10, # FAST detector에서 근처 픽셀들이 얼마나 밝거나 어두워야 하는지에 대한 임계값
-        )
+        )                
+        kp_contour, _ = orb_contour.detectAndCompute(edges, mask=dilated_edges)
         
-        self.kp1, _ = orb.detectAndCompute(edges, None)
+        # Detect features in internal region
+        orb_internal = orb.create(
+            nfeatures=internal_features, # 상위 몇개의 특징점을 사용할 것인지
+            scaleFactor=1.2, 
+            nlevels=8,
+            edgeThreshold=orb_edgeThreshold,
+            # Backgroud image는 이 값을 줄여야 함.
+            firstLevel=0,
+            WTA_K=2, # BRIEF descriptor가 사용할 bit 가짓수. binary이므로 1bit임.
+            scoreType=cv2.ORB_HARRIS_SCORE, 
+            patchSize=orb_patchSize,
+            fastThreshold=10, # FAST detector에서 근처 픽셀들이 얼마나 밝거나 어두워야 하는지에 대한 임계값
+        )                
+        internal_mask = ~dilated_edges
+        kp_internal, _ = orb_internal.detectAndCompute(gray, mask=internal_mask)
+        
+        print(f"contour keypoints: {len(kp_contour)}, internal keypoints: {len(kp_internal)}")
+        
+        # Combine keypoints
+        self.kp1 = kp_contour + kp_internal
+        if getattr(self, "_set_orb_debug"):
+            circle_size = min(self.img.shape[:2]) // 200            
+            result = self.img.copy()
+            for internal_kp in kp_internal:
+                x, y = internal_kp.pt
+                cv2.circle(result, (int(x), int(y)), circle_size, (0, 255, 0), -1)
+            
+            print(f"orb_patchSize: {orb_patchSize}\norb_edgeThreshold: {orb_edgeThreshold}")    
+            plt.imshow(result)
+            plt.title(
+                f"""
+                internal object image orb
+                circle_size: {circle_size}
+                count: {len(kp_internal)}
+                orb_patchSize: {orb_patchSize}
+                orb_edgeThreshold: {orb_edgeThreshold}                
+                    """)
+            plt.show()
+            
+        if getattr(self, "_set_orb_debug"):
+            circle_size = min(self.img.shape[:2]) // 200
+            result = self.img.copy()
+            for contour_kp in kp_contour:
+                x, y = contour_kp.pt
+                cv2.circle(result, (int(x), int(y)), circle_size, (0, 255, 0), -1)
+            
+            print(f"orb_patchSize: {orb_patchSize}\norb_edgeThreshold: {orb_edgeThreshold}")    
+            plt.imshow(result)
+            plt.title(
+                f"""
+                contour object image orb
+                circle_size: {circle_size}
+                count: {len(kp_contour)}
+                orb_patchSize: {orb_patchSize}
+                orb_edgeThreshold: {orb_edgeThreshold}
+                    """)
+            plt.show()                                        
+                                        
         # 이미지와 keypoint 리사이징
         self.resize_image_and_keypoints()
         
@@ -113,10 +192,11 @@ class ObjectImg(ImgBase):
         self.kp1 = ImgBase.non_max_suppression(self.kp1, nms_distance)
         
         if getattr(self, f"_set_orb_debug"):
+            circle_size = min(self.img.shape[:2]) // 150
             result = self.img.copy()
             for kp in self.kp1:
                 x, y = kp.pt
-                cv2.circle(result, (int(x), int(y)), 1, (255, 0, 0), -1)
+                cv2.circle(result, (int(x), int(y)), circle_size, (0, 0, 255), -1)
             print(f"orb_patchSize: {orb_patchSize}\norb_edgeThreshold: {orb_edgeThreshold}")    
             plt.imshow(result)
             plt.title(
@@ -128,7 +208,7 @@ class ObjectImg(ImgBase):
                     """)
             plt.show()
             
-        print(f"object keypoints: {len(self.kp1)}")
+        print(f"total object keypoints: {len(self.kp1)}")
         
         self._N = len(self.kp1)
         
