@@ -1,6 +1,6 @@
 # HIPI
 
-*Read this in other languages: [한국어](docs/README_ko.md)*
+*Read this in other languages: [English](/README.md)*
 
 HIPI - 실사 숨은그림찾기를 Shape matching과 Style Transfer 모델을 활용하여 제작하는 서비스입니다.
 
@@ -60,8 +60,6 @@ HIPI - 실사 숨은그림찾기를 Shape matching과 Style Transfer 모델을 �
 ### 6. Style Transfer:
 StyleID라는 모델[Chung et al.][7]을 활용하여 배경을 Style, 합성된 이미지를 Content로 스타일 전이를 진행합니다. 감마값과 T값을 적절히 조절하여 스타일 전이를 진행합니다.
 
-## Code Instruction
-...
 ## Demo
 최종적으로 나온 사진은 아래와 같습니다.
 
