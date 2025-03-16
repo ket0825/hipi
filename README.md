@@ -53,8 +53,6 @@ When compositing images, the rotation angle and scale changes from PCA must be c
 ### 6. Style Transfer:
 Using the StyleID model[Chung et al.][7], style transfer is performed with the background as Style and the composited image as Content. Gamma and T values are appropriately adjusted during the style transfer process.
 
-## Code Instruction
-...
 ## Demo
 
 Figure 4. background image(left) and hidden picture puzzle with apple and zebra(right)
